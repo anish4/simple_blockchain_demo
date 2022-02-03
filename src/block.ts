@@ -1,4 +1,11 @@
 import { SHA256 } from "crypto-js";
+import { hexToBinary } from "./utils";
+
+//seconds
+const BLOCK_GENERATION_INTERVAL: number = 20000;
+
+//blocks
+const DIFFICULTY_ADJUSTMENT_INTERVAL: number = 5;
 
 class block {
   public index: number;
@@ -6,19 +13,25 @@ class block {
   public timestamps: number;
   public prevHash: string;
   public data: string;
+  public difficulty: number;
+  public nonce: number;
 
   constructor(
     index: number,
     hash: string,
     timestamps: number,
     prevHash: string,
-    data: string
+    data: string,
+    difficulty: number,
+    nonce: number
   ) {
     this.index = index;
     this.hash = hash;
     this.timestamps = timestamps;
     this.prevHash = prevHash;
     this.data = data;
+    this.difficulty = difficulty;
+    this.nonce = nonce;
   }
 }
 
@@ -26,12 +39,20 @@ const calculateHash = (
   index: number,
   timestamps: number,
   prevHash: string,
-  data: string
-): string => SHA256(index + timestamps + prevHash + data).toString();
+  data: string,
+  difficulty: number,
+  nonce: number
+): string =>
+  SHA256(index + timestamps + prevHash + data + difficulty + nonce).toString();
 
 const calculateHashOfBlock = (block: block): string =>
   SHA256(
-    block.index + block.timestamps + block.prevHash + block.data
+    block.index +
+      block.timestamps +
+      block.prevHash +
+      block.data +
+      block.difficulty +
+      block.nonce
   ).toString();
 
 const genesisBlock: block = new block(
@@ -39,7 +60,9 @@ const genesisBlock: block = new block(
   "ec9ab4c9833cd03c924da228cd574bbdec0f220b3a805dec3fecc32636833db9",
   1643539434835,
   null,
-  "my genesis block!!"
+  "first block!!",
+  0,
+  0
 );
 
 let blockChain: block[] = [genesisBlock];
@@ -61,9 +84,42 @@ const generateBlock = (blockData: string): block => {
   const index = currentBlock.index + 1;
   const timestamps = new Date().getTime();
   const prevHash = currentBlock.hash;
-  const hash = calculateHash(index, timestamps, prevHash, blockData);
-  const newBlock = new block(index, hash, timestamps, prevHash, blockData);
-  return newBlock;
+  const difficulty = getDifficulty(getBlockChain());
+  const block = findBlock(index, timestamps, prevHash, blockData, difficulty);
+  addBlock(block);
+  return block;
+};
+
+const findBlock = (
+  index: number,
+  timestamps: number,
+  prevHash: string,
+  blockData: string,
+  difficulty: number
+) => {
+  let nonce = 0;
+  while (true) {
+    const hash = calculateHash(
+      index,
+      timestamps,
+      prevHash,
+      blockData,
+      difficulty,
+      nonce
+    );
+    if (hashMatchDifficulty(hash, difficulty)) {
+      return new block(
+        index,
+        hash,
+        timestamps,
+        prevHash,
+        blockData,
+        difficulty,
+        nonce
+      );
+    }
+    nonce++;
+  }
 };
 
 const isValidBlockStructure = (block: block): boolean =>
@@ -83,10 +139,10 @@ const isValidBlock = (newBlock: block, previousBlock: block): boolean => {
     console.log("invalid index!!");
     return false;
   } else if (newBlock.prevHash !== previousBlock.hash) {
-    console.log("invalid hash");
+    console.log("invalid hash1");
     return false;
   } else if (calculateHashOfBlock(newBlock) !== newBlock.hash) {
-    console.log("invalid hash");
+    console.log("invalid hash2");
     return false;
   }
   return true;
@@ -118,6 +174,39 @@ const replaceChain = (newBlock: block[]) => {
     blockChain = newBlock;
   } else {
     console.log("invalid chain");
+  }
+};
+
+const hashMatchDifficulty = (hash: string, difficulty: number) => {
+  const hashToBinary: string = hexToBinary(hash);
+  console.log(difficulty);
+  const prefix = "0".repeat(difficulty);
+  return hashToBinary.startsWith(prefix);
+};
+
+const getDifficulty = (chain: block[]): number => {
+  const latestBlock = chain[chain.length - 1];
+  if (
+    latestBlock.index % DIFFICULTY_ADJUSTMENT_INTERVAL === 0 &&
+    latestBlock.index !== 0
+  ) {
+    console.log("hi");
+    return adjustedDifficulty(latestBlock, chain);
+  } else return latestBlock.difficulty;
+};
+
+const adjustedDifficulty = (latestBlock: block, chain: block[]): number => {
+  const prevAdjustmentBlock: block =
+    chain[blockChain.length - DIFFICULTY_ADJUSTMENT_INTERVAL];
+  const expectedTime =
+    BLOCK_GENERATION_INTERVAL * DIFFICULTY_ADJUSTMENT_INTERVAL;
+  const timeTaken = latestBlock.timestamps - prevAdjustmentBlock.timestamps;
+  if (timeTaken > expectedTime * 2) {
+    return prevAdjustmentBlock.difficulty - 1;
+  } else if (timeTaken < expectedTime / 2) {
+    return prevAdjustmentBlock.difficulty + 1;
+  } else {
+    return latestBlock.difficulty;
   }
 };
 
